@@ -14,6 +14,12 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
           new Date(youtubeOpenedTime).toLocaleTimeString()
         );
       });
+    } else if (wasOnYouTube && !isOnYouTube) {
+      const youtubeClosedTime = Date.now();
+      console.log(
+        "YouTube closed at:",
+        new Date(youtubeClosedTime).toLocaleTimeString()
+      );
     }
   }
 });
@@ -35,6 +41,12 @@ chrome.tabs.onActivated.addListener((activeInfo) => {
               new Date(youtubeOpenedTime).toLocaleTimeString()
             );
           }
+        );
+      } else if (wasOnYouTube && !isOnYouTube) {
+        const youtubeClosedTime = Date.now();
+        console.log(
+          "YouTube closed at:",
+          new Date(youtubeClosedTime).toLocaleTimeString()
         );
       }
     }
