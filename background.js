@@ -1,37 +1,13 @@
-// Track all YouTube tabs and their states
-let youtubeTabs = new Map(); // Map to store tab info
+let youtubeTabs = new Map();
 let isTracking = false;
 let updateTimer = null;
 let sessionStartTime = null;
 let totalSessionTime = 0;
-let totalWatchTime = 0;
+let breakThresholdMinutes = 30;
 
-// Initialize total watch time from storage
-function initializeFromStorage() {
-  chrome.storage.local.get(["persistentTotalTime"], (result) => {
-    if (result.persistentTotalTime !== undefined) {
-      totalWatchTime = result.persistentTotalTime;
-      console.log("Initialized persistent total watch time:", totalWatchTime);
-    }
-  });
-}
-
-// Call initialization
-initializeFromStorage();
-
-// Listen for browser shutdown
-chrome.runtime.onSuspend.addListener(() => {
-  if (sessionStartTime) {
-    const finalSessionTime = totalSessionTime + (Date.now() - sessionStartTime);
-    const finalTotal = totalWatchTime + finalSessionTime;
-    // Use synchronous storage to ensure it saves before browser closes
-    chrome.storage.local.set({
-      persistentTotalTime: finalTotal,
-    });
-  } else {
-    chrome.storage.local.set({
-      persistentTotalTime: totalWatchTime,
-    });
+chrome.storage.local.get(["breakThreshold"], (result) => {
+  if (result.breakThreshold) {
+    breakThresholdMinutes = result.breakThreshold;
   }
 });
 
@@ -53,22 +29,25 @@ function calculateDuration(duration, precise = false) {
   }
 }
 
-function updateTotalWatchTime(additionalTime) {
-  // Always get the latest total from storage before updating
-  chrome.storage.local.get(["persistentTotalTime"], (result) => {
-    const currentTotal = result.persistentTotalTime || 0;
-    const newTotal = currentTotal + additionalTime;
+function checkBreakNeeded(currentDuration) {
+  const thresholdMs = breakThresholdMinutes * 60 * 1000;
+  const lastNotificationTime = window.lastNotificationTime || 0;
+  const timeSinceLastNotification = Date.now() - lastNotificationTime;
 
-    chrome.storage.local.set(
-      {
-        persistentTotalTime: newTotal,
-      },
-      () => {
-        totalWatchTime = newTotal;
-        console.log("Updated total watch time:", newTotal);
-      }
-    );
-  });
+  // Only show notification if enough time has passed since last one (5 minutes)
+  if (
+    currentDuration >= thresholdMs &&
+    timeSinceLastNotification >= 5 * 60 * 1000
+  ) {
+    window.lastNotificationTime = Date.now();
+    chrome.notifications.create({
+      type: "basic",
+      iconUrl: "icon48.png",
+      title: "Time for a Break",
+      message: `You've been watching YouTube for ${breakThresholdMinutes} minutes. Consider taking a break!`,
+      requireInteraction: true,
+    });
+  }
 }
 
 function updateTrackingState() {
@@ -77,26 +56,25 @@ function updateTrackingState() {
     ? totalSessionTime + (currentTime - sessionStartTime)
     : totalSessionTime;
 
+  console.log("Current duration (ms):", currentSessionDuration);
+  console.log("Threshold (ms):", breakThresholdMinutes * 60 * 1000);
+
   const state = {
     isTracking,
     currentSessionDuration: calculateDuration(currentSessionDuration, true),
     totalSessionTime: currentSessionDuration,
-    totalWatchTime,
   };
 
   chrome.storage.local.set({ trackingState: state });
+  checkBreakNeeded(currentSessionDuration);
 }
 
 function startPeriodicUpdate() {
   if (updateTimer) {
     clearInterval(updateTimer);
   }
-
   updateTrackingState();
-
-  updateTimer = setInterval(() => {
-    updateTrackingState();
-  }, 1000);
+  updateTimer = setInterval(updateTrackingState, 1000);
 }
 
 function stopPeriodicUpdate() {
@@ -104,23 +82,16 @@ function stopPeriodicUpdate() {
     clearInterval(updateTimer);
     updateTimer = null;
   }
-
   if (sessionStartTime) {
-    const additionalTime = Date.now() - sessionStartTime;
-    totalSessionTime += additionalTime;
+    totalSessionTime += Date.now() - sessionStartTime;
     sessionStartTime = null;
-
-    // Update the total watch time with the final session time
-    updateTotalWatchTime(totalSessionTime);
   }
-
   updateTrackingState();
 }
 
 function pauseTracking() {
   if (sessionStartTime) {
-    const additionalTime = Date.now() - sessionStartTime;
-    totalSessionTime += additionalTime;
+    totalSessionTime += Date.now() - sessionStartTime;
     sessionStartTime = null;
     updateTrackingState();
   }
@@ -144,12 +115,6 @@ function checkYouTubeActivity() {
     if (isTracking) {
       isTracking = false;
       stopPeriodicUpdate();
-
-      // Store the last session time
-      chrome.storage.local.set({
-        lastSession: totalSessionTime,
-      });
-
       totalSessionTime = 0;
       sessionStartTime = null;
     }
@@ -169,24 +134,20 @@ function checkYouTubeActivity() {
   }
 }
 
-// Update tab info when audio state changes
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (tab.url && tab.url.includes("youtube.com")) {
     const currentTab = youtubeTabs.get(tabId) || {
       isPlaying: false,
       url: tab.url,
     };
-
     if (changeInfo.audible !== undefined) {
       currentTab.isPlaying = changeInfo.audible;
     }
-
     youtubeTabs.set(tabId, currentTab);
     checkYouTubeActivity();
   }
 });
 
-// Clean up when a tab is closed
 chrome.tabs.onRemoved.addListener((tabId) => {
   if (youtubeTabs.has(tabId)) {
     youtubeTabs.delete(tabId);
@@ -194,7 +155,6 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   }
 });
 
-// Initial check of all tabs when extension loads
 chrome.tabs.query({}, (tabs) => {
   tabs.forEach((tab) => {
     if (tab.url && tab.url.includes("youtube.com")) {
