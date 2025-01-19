@@ -37,6 +37,10 @@ function updatePopup() {
     });
   });
 }
+// debug button to trigger break
+document.getElementById("debugButton").addEventListener("click", () => {
+  chrome.runtime.sendMessage({ action: "debugTriggerBreak" });
+});
 
 document.getElementById("breakThreshold").addEventListener("change", (e) => {
   const minutes = parseInt(e.target.value);

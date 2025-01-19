@@ -3,7 +3,7 @@
   "name": "YouTube Time Tracker",
   "version": "1.0",
   "description": "Tracks time spent on YouTube",
-  "permissions": ["tabs", "storage", "tabCapture", "notifications"],
+  "permissions": ["tabs", "storage", "tabCapture"],
   "background": {
     "scripts": ["background.js"],
     "persistent": false

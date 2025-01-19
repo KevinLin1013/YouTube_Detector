@@ -4,10 +4,12 @@ let updateTimer = null;
 let sessionStartTime = null;
 let totalSessionTime = 0;
 let breakThresholdMinutes = 30;
+let originalThreshold = 30;
 
 chrome.storage.local.get(["breakThreshold"], (result) => {
   if (result.breakThreshold) {
     breakThresholdMinutes = result.breakThreshold;
+    originalThreshold = result.breakThreshold;
   }
 });
 
@@ -29,25 +31,36 @@ function calculateDuration(duration, precise = false) {
   }
 }
 
+let popupShown = false;
+
 function checkBreakNeeded(currentDuration) {
   const thresholdMs = breakThresholdMinutes * 60 * 1000;
-  const lastNotificationTime = window.lastNotificationTime || 0;
-  const timeSinceLastNotification = Date.now() - lastNotificationTime;
 
-  // Only show notification if enough time has passed since last one (5 minutes)
-  if (
-    currentDuration >= thresholdMs &&
-    timeSinceLastNotification >= 5 * 60 * 1000
-  ) {
-    window.lastNotificationTime = Date.now();
-    chrome.notifications.create({
-      type: "basic",
-      iconUrl: "icon48.png",
-      title: "Time for a Break",
-      message: `You've been watching YouTube for ${breakThresholdMinutes} minutes. Consider taking a break!`,
-      requireInteraction: true,
+  if (currentDuration >= thresholdMs && !popupShown) {
+    popupShown = true;
+    chrome.windows.create({
+      url: "break-popup.html",
+      type: "popup",
+      width: 340,
+      height: 190,
+      left: Math.round((screen.width - 340) / 2),
+      top: Math.round((screen.height - 190) / 2),
     });
   }
+}
+
+function resetTimer() {
+  totalSessionTime = 0;
+  sessionStartTime = Date.now();
+  breakThresholdMinutes = originalThreshold;
+  popupShown = false;
+  updateTrackingState();
+}
+
+function extendThreshold() {
+  breakThresholdMinutes += 5;
+  popupShown = false;
+  updateTrackingState();
 }
 
 function updateTrackingState() {
@@ -55,9 +68,6 @@ function updateTrackingState() {
   const currentSessionDuration = sessionStartTime
     ? totalSessionTime + (currentTime - sessionStartTime)
     : totalSessionTime;
-
-  console.log("Current duration (ms):", currentSessionDuration);
-  console.log("Threshold (ms):", breakThresholdMinutes * 60 * 1000);
 
   const state = {
     isTracking,
@@ -148,11 +158,17 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   }
 });
 
-chrome.tabs.onRemoved.addListener((tabId) => {
-  if (youtubeTabs.has(tabId)) {
-    youtubeTabs.delete(tabId);
-    checkYouTubeActivity();
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.action === "takeBreak") {
+    resetTimer();
+  } else if (message.action === "continueWatching") {
+    extendThreshold();
+  } else if (message.action === "debugTriggerBreak") {
+    const debugDuration = breakThresholdMinutes * 60 * 1000 + 1000;
+    checkBreakNeeded(debugDuration);
+    sendResponse({ status: "Break triggered" });
   }
+  return true;
 });
 
 chrome.tabs.query({}, (tabs) => {
